@@ -201,10 +201,6 @@
   
   )
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; TBD: Implement the following macros
-;;
-
 (defmacro group [name & body]
   ;; Пример
   ;; (group Agent
@@ -216,7 +212,21 @@
   ;; 3) Создает следующие функции
   ;;    (select-agent-proposal) ;; select person, phone, address, price from proposal;
   ;;    (select-agent-agents)  ;; select clients_id, proposal_id, agent from agents;
-  )
+  
+  (defn build-group [list]
+    (if (empty? list)
+      {}
+      (let [[table-name _ table-fields & other] list]         
+        (conj (build-group (or other '())) [(symbol table-name) (map keyword table-fields)]))))
+    (def group-body (build-group body))
+  
+  (cons 'do
+        (cons `(def ~(symbol (str name "-group")) (quote ~group-body))
+              (map (fn [[table-name table-fields]]
+                     `(def ~(symbol (str "select-" (clojure.string/lower-case name) "-" table-name))
+                        (let [~(symbol (str table-name "-fields-var")) (quote ~table-fields)]
+                          (select ~table-name (~'fields ~@table-fields)))))
+                   (vec group-body)))))
 
 (defmacro user [name & body]
   ;; Пример
@@ -224,7 +234,14 @@
   ;;     (belongs-to Agent))
   ;; Создает переменные Ivanov-proposal-fields-var = [:person, :phone, :address, :price]
   ;; и Ivanov-agents-fields-var = [:clients_id, :proposal_id, :agent]
-  )
+  
+  (def group-name (first (rest (first body))))
+  (def group-body (eval (symbol (str group-name "-group"))))
+
+  (cons 'do
+        (map (fn [[table-name table-fields]]
+               `(def ~(symbol (str name "-" table-name "-fields-var")) (quote ~table-fields)))
+             group-body)))
 
 (defmacro with-user [name & body]
   ;; Пример
@@ -236,4 +253,11 @@
   ;;    proposal-fields-var и agents-fields-var.
   ;;    Таким образом, функция select, вызванная внутри with-user, получает
   ;;    доступ ко всем необходимым переменным вида <table-name>-fields-var.
-  )
+  
+  (def variables (filter #(re-matches (re-pattern (str "^" 'Ivanov ".*")) (str %))
+                         (keys (ns-interns 'clojure-course-task03.core))))
+  (def local-bindings
+    (reduce (fn [acc el] (concat [(symbol (clojure.string/replace-first (str el) (str name "-") "")) (cons 'list (eval el))] acc))
+            []
+            variables))
+  `(let ~(vec local-bindings) ~@body))
