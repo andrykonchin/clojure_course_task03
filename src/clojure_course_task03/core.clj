@@ -201,6 +201,28 @@
   
   )
 
+
+(defn build-group [list]
+  (if (empty? list)
+    {}
+    (let [[table-name _ table-fields & other] list]
+      (conj (build-group (or other '()))
+            [(symbol table-name) (map keyword table-fields)]))))
+
+(defn merge-groups [groups]
+  (reduce (fn [acc el]
+            (merge-with (fn [a b]
+                          (if (or (contains? (vec a) :all) (contains? (vec b) :all))
+                            (hash-set :all)
+                            (reduce conj a b)))
+                        acc
+                        el))
+          groups))
+
+(defn group-by-name [name] (eval (symbol (str name "-group"))))
+
+
+
 (defmacro group [name & body]
   ;; Пример
   ;; (group Agent
@@ -213,20 +235,15 @@
   ;;    (select-agent-proposal) ;; select person, phone, address, price from proposal;
   ;;    (select-agent-agents)  ;; select clients_id, proposal_id, agent from agents;
   
-  (defn build-group [list]
-    (if (empty? list)
-      {}
-      (let [[table-name _ table-fields & other] list]         
-        (conj (build-group (or other '())) [(symbol table-name) (map keyword table-fields)]))))
-    (def group-body (build-group body))
-  
-  (cons 'do
-        (cons `(def ~(symbol (str name "-group")) (quote ~group-body))
-              (map (fn [[table-name table-fields]]
-                     `(def ~(symbol (str "select-" (clojure.string/lower-case name) "-" table-name))
-                        (let [~(symbol (str table-name "-fields-var")) (quote ~table-fields)]
-                          (select ~table-name (~'fields ~@table-fields)))))
-                   (vec group-body)))))
+  (let [group-body (build-group body)]
+    (cons 'do
+          (cons `(def ~(symbol (str name "-group")) (quote ~group-body))
+                (map (fn [[table-name table-fields]]
+                       `(defn ~(symbol (str "select-" (clojure.string/lower-case name) "-" table-name)) []
+                          (let [~(symbol (str table-name "-fields-var")) (quote ~table-fields)]
+                            (select ~table-name (~'fields ~@table-fields)))))
+                     (vec group-body))))))
+
 
 (defmacro user [name & body]
   ;; Пример
@@ -235,13 +252,10 @@
   ;; Создает переменные Ivanov-proposal-fields-var = [:person, :phone, :address, :price]
   ;; и Ivanov-agents-fields-var = [:clients_id, :proposal_id, :agent]
   
-  (def group-name (first (rest (first body))))
-  (def group-body (eval (symbol (str group-name "-group"))))
-
   (cons 'do
         (map (fn [[table-name table-fields]]
                `(def ~(symbol (str name "-" table-name "-fields-var")) (quote ~table-fields)))
-             group-body)))
+             (merge-groups (map group-by-name (rest (first body)))))))
 
 (defmacro with-user [name & body]
   ;; Пример
@@ -254,8 +268,8 @@
   ;;    Таким образом, функция select, вызванная внутри with-user, получает
   ;;    доступ ко всем необходимым переменным вида <table-name>-fields-var.
   
-  (def variables (filter #(re-matches (re-pattern (str "^" 'Ivanov ".*")) (str %))
-                         (keys (ns-interns 'clojure-course-task03.core))))
+  (def variables (filter #(re-matches (re-pattern (str "^" name ".*")) (str %))
+                         (keys (ns-interns (ns-name *ns*)))))
   (def local-bindings
     (reduce (fn [acc el] (concat [(symbol (clojure.string/replace-first (str el) (str name "-") "")) (cons 'list (eval el))] acc))
             []
