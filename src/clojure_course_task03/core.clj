@@ -1,5 +1,6 @@
 (ns clojure-course-task03.core
-  (:require [clojure.set]))
+  (:require [clojure.set])
+  (:require [clojure.string :as str]))
 
 (defn join* [table-name conds]
   (let [op (first conds)
@@ -213,7 +214,7 @@
   (reduce (fn [acc el]
             (merge-with (fn [a b]
                           (if (or (contains? (vec a) :all) (contains? (vec b) :all))
-                            (hash-set :all)
+                            [:all]
                             (reduce conj a b)))
                         acc
                         el))
@@ -239,9 +240,11 @@
     (cons 'do
           (cons `(def ~(symbol (str name "-group")) (quote ~group-body))
                 (map (fn [[table-name table-fields]]
-                       `(defn ~(symbol (str "select-" (clojure.string/lower-case name) "-" table-name)) []
-                          (let [~(symbol (str table-name "-fields-var")) (quote ~table-fields)]
-                            (select ~table-name (~'fields ~@table-fields)))))
+                       (let [f-name (symbol (str "select-" (str/lower-case name) "-" table-name))
+                             v-name (symbol (str table-name "-fields-var"))]
+                         `(defn ~f-name []
+                            (let [~v-name (quote ~table-fields)]
+                              (select ~table-name (~'fields ~@table-fields))))))
                      (vec group-body))))))
 
 
@@ -254,7 +257,8 @@
   
   (cons 'do
         (map (fn [[table-name table-fields]]
-               `(def ~(symbol (str name "-" table-name "-fields-var")) (quote ~table-fields)))
+               (let [v-name (symbol (str name "-" table-name "-fields-var"))]
+                 `(def ~v-name (quote ~table-fields))))
              (merge-groups (map group-by-name (rest (first body)))))))
 
 (defmacro with-user [name & body]
@@ -271,7 +275,10 @@
   (def variables (filter #(re-matches (re-pattern (str "^" name ".*")) (str %))
                          (keys (ns-interns (ns-name *ns*)))))
   (def local-bindings
-    (reduce (fn [acc el] (concat [(symbol (clojure.string/replace-first (str el) (str name "-") "")) (cons 'list (eval el))] acc))
+    (reduce (fn [acc el]
+              (let [v-name (symbol (str/replace-first (str el) (str name "-") ""))
+                    v-value (cons 'list (eval el))]
+                (concat [v-name v-value] acc)))
             []
             variables))
   `(let ~(vec local-bindings) ~@body))
